@@ -380,7 +380,6 @@ if __name__ == "__main__":
     }
 
 
-
     '''
     # Call desdb to find the tiles we need to download and delete any existing DB tables which are the same as your run label.
     if MPI.COMM_WORLD.Get_rank()==0:
@@ -396,7 +395,6 @@ if __name__ == "__main__":
     if MPI.COMM_WORLD.Get_rank()==0:
         CatPDFs(outdir, outname, tiles)
     '''
-
 
 
     retrievedata = esutil.io.read(retrievefile)
