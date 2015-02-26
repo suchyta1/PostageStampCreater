@@ -15,7 +15,7 @@ from mpi4py import MPI
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 
@@ -170,13 +170,19 @@ def Clip(outside, iter=1):
     std = np.std(clipped)
     avg = np.average(clipped)
     while True:
+        if len(clipped) < 10:
+            print 'lots of clipping'
+            break
+
         diff = clipped - avg
         cut = (np.fabs(diff) < 3*std)
         clipped = clipped[cut]
 
         std = np.std(clipped)
         newavg = np.average(clipped)
-        if np.fabs(newavg - avg)/avg < 0.05:
+        #if (np.fabs(newavg - avg) <= 0.05*avg):
+        #if np.fabs(newavg - avg)/avg < 0.05:
+        if ((newavg - avg) <= 0.05*np.fabs(avg)) and ((newavg - avg) >= -0.05*np.fabs(avg)):
             break
         avg = newavg
 
@@ -186,27 +192,38 @@ def Clip(outside, iter=1):
     return vmin, vmax
 
 
-def PlotPostageStamps(tile, files, outdir, pos, layout, bands, imext, min, nocentroids=False):
+def PlotPostageStamps(tile, files, outdir, pos, layout, bands, imext, min, extra, maxratio=2):
     odir = os.path.join(outdir, tile)
     if os.path.exists(odir):
         subprocess.call( ['rm', '-r', odir] )
 
     Mkdir(odir)
     outpdf = os.path.join(outdir, '%s.pdf'%tile)
-    #Remove(outpdf)
-    #pdf = PdfPages(outpdf)
 
     ifiles = []
     for i in range(len(pos)):
-        #xmin = int(pos[i][0]-1)
         xmin = int(pos[i][0])
         xmax = int(pos[i][1])
         xmin, xmax = Pad(min, xmin, xmax)
 
-        #ymin = int(pos[i][2]-1)
         ymin = int(pos[i][2])
         ymax = int(pos[i][3])
         ymin, ymax = Pad(min, ymin, ymax)
+
+        minx = min
+        miny = min
+        xdiff = xmax - xmin + 1
+        ydiff = ymax - ymin + 1
+        while float(xdiff)/ydiff > maxratio:
+            ymin -= 1
+            ymax += 1
+            miny += 2
+            ydiff = ymax - ymin + 1
+        while float(ydiff)/xdiff > maxratio:
+            xmin -= 1
+            xmax += 1
+            minx += 2
+            xdiff = xmax - xmin + 1
 
 
         fig = plt.figure(i, figsize=(12,6))
@@ -215,8 +232,8 @@ def PlotPostageStamps(tile, files, outdir, pos, layout, bands, imext, min, nocen
             SubBounds = galsim.BoundsI(xmin, xmax, ymin, ymax)
             area = img[SubBounds].array
 
-            yBounds = EdgeBounds(area.shape[0], min, img.array.shape[0], ymin, ymax)
-            xBounds = EdgeBounds(area.shape[1], min, img.array.shape[1], xmin, xmax)
+            yBounds = EdgeBounds(area.shape[0], minx, img.array.shape[0], ymin, ymax)
+            xBounds = EdgeBounds(area.shape[1], miny, img.array.shape[1], xmin, xmax)
             SubBounds = galsim.BoundsI(xBounds[0], xBounds[1], yBounds[0], yBounds[1])
             area = img[SubBounds].array
 
@@ -232,22 +249,26 @@ def PlotPostageStamps(tile, files, outdir, pos, layout, bands, imext, min, nocen
 
             #area = pyfits.open(files[j])[0].data[xmin:xmax, ymin:ymax]
             ax = fig.add_subplot(layout[0], layout[1], j+1)
-            cax = ax.imshow(area, origin='lower', cmap=plt.get_cmap('gray'), aspect='auto', vmin=vmin, vmax=vmax)
-            cbar = fig.colorbar(cax)
-           
-            if not nocentroids:
-                px = pos[i][4+2*j] - xBounds[0]
-                py = pos[i][5+2*j] - yBounds[0]
-                ax.scatter( [px], [py], alpha=0.35, s=10, facecolors='none', edgecolors='red')
-                #ax.scatter( [px], [py], alpha=0.5, s=3, color='red', marker='x')
+            #cax = ax.imshow(area, origin='lower', cmap=plt.get_cmap('gray'), aspect='auto', vmin=vmin, vmax=vmax)
+            cax = ax.imshow(area, origin='lower', cmap=plt.get_cmap('gray'), vmin=vmin, vmax=vmax)
+            divider = make_axes_locatable(ax)
+            d = divider.append_axes("right", size="5%", pad=0.05)
+            cbar = fig.colorbar(cax, cax=d)
+        
+            if len(extra[i][j]) > 0:
+                px = extra[i][j][:,0] - xBounds[0]
+                py = extra[i][j][:,1] - yBounds[0]
+                ax.scatter( px, py, alpha=0.35, s=10, facecolors='none', edgecolors='red')
 
-                ax.set_xlim( [0, xBounds[1]-xBounds[0]+1] )
-                ax.set_ylim( [0, yBounds[1]-yBounds[0]+1] )
-
-                title = r'%s, centroid = (%.1f, %.1f)' %(bands[j], pos[i][4+2*j],pos[i][5+2*j])
-            else:
-                title = r'%s' %(bands[j])
-
+            xaxis_max = xBounds[1]-xBounds[0]+1
+            yaxis_max = yBounds[1]-yBounds[0]+1
+            xticks = np.arange(0, xaxis_max, 50)
+            yticks = np.arange(0, yaxis_max, 50)
+            ax.xaxis.set_ticks(xticks)
+            ax.yaxis.set_ticks(yticks)
+            ax.set_xlim( [0, xaxis_max] )
+            ax.set_ylim( [0, yaxis_max] )
+            title = r'%s' %(bands[j])
             ax.set_title(title, fontsize=12)
 
         fig.suptitle(r'%s: Bounds = (%i:%i, %i:%i)' %(tile, xBounds[0],xBounds[1], yBounds[0],yBounds[1]), fontsize=12 )
@@ -257,11 +278,7 @@ def PlotPostageStamps(tile, files, outdir, pos, layout, bands, imext, min, nocen
         file = os.path.join(odir, '%i.pdf' %i) 
         ifiles.append(file)
         plt.savefig(file, format='pdf')
-
-        #pdf.savefig(fig)
         plt.close(fig)
-
-    #pdf.close()
 
     gs = ['gs', '-dBATCH', '-dNOPAUSE', '-q', '-sDEVICE=pdfwrite', '-sOutputFile=%s'%(outpdf)] 
     for pdf in ifiles:
@@ -291,7 +308,7 @@ def ServeProcesses(queue):
     for i in range(MPI.COMM_WORLD.size-1):
         MPI.COMM_WORLD.send(['shutdown',None], dest=(i+1))
 
-def DoProcesses(imgdir, layout, outdir, nocentroids, bands, imext, min):
+def DoProcesses(imgdir, layout, outdir, bands, imext, min):
 
     rank = MPI.COMM_WORLD.Get_rank()
     while True:
@@ -300,45 +317,55 @@ def DoProcesses(imgdir, layout, outdir, nocentroids, bands, imext, min):
         if job[0] == 'shutdown':
             break
 
-        tile, images, psfs, pos = job
+        tile, images, psfs, pos, extra = job
         imdir = os.path.join(imgdir, tile)
         Mkdir(imdir)
         images, psfs = Download(imdir , images, psfs, skip=False)
-        PlotPostageStamps(tile, images, outdir, pos, layout, bands, imext, min, nocentroids=nocentroids) 
+        PlotPostageStamps(tile, images, outdir, pos, layout, bands, imext, min, extra) 
         Clean(images, psfs)
 
 
+def BlankExtra(cc, bands):
+    c = []
+    for band in bands:
+        c.append([])
+    cc.append(c)
+    return cc
 
-def GetCoords(rdata, tiles, images, psfs, bands, xmin='xmin_image', xmax='xmax_image', ymin='ymin_image', ymax='ymax_image', cx='xwin_image', cy='ywin_image', tilename='tilename', nocentroids=False):
+
+def GetCoords(rdata, edata, tiles, images, psfs, bands, xmin='xmin_image', xmax='xmax_image', ymin='ymin_image', ymax='ymax_image', tilename='tilename', ps_index='index', extra_index='index', extra=None):
     pos = Queue.Queue(len(tiles))
     for i in range(len(tiles)):
         tilecut = (rdata[tilename]==tiles[i])
         size = np.sum(tilecut)
-
-        if not nocentroids:
-            cols = 4 + 2*len(bands)
-        else:
-            cols = 4
-        p = np.empty( (size,cols) )
-
+        p = np.empty( (size,4) )
         p[:,0] = rdata[tilecut][xmin]
         p[:,1] = rdata[tilecut][xmax]
         p[:,2] = rdata[tilecut][ymin]
         p[:,3] = rdata[tilecut][ymax]
-   
-        if not nocentroids:
-            centroids = []
-            ind = 4
-            for band in bands:
-                c = rdata[tilecut]['%s_%s'%(cx,band.lower())]
-                p[:,ind] = c
-                ind += 1
 
-                c = rdata[tilecut]['%s_%s'%(cy,band.lower())]
-                p[:,ind] = c
-                ind += 1
-        
-        pos.put( [tiles[i],images[i],psfs[i],p] )
+        #cc = [ [ [] ] * len(bands) ] * size
+        cc = []
+        for s in range(size):
+            if extra==None:
+                cc = BlankExtra(cc, bands)
+                continue
+
+            ind = rdata[tilecut][ps_index][s]
+            ecut = (edata[extra_index]==ind)
+            esize = np.sum(ecut)
+            if esize==0:
+                cc = BlankExtra(cc, bands)
+                continue
+
+            c = []
+            for j in range(len(bands)):
+                ccc = np.empty( (esize,2) )
+                ccc[:,0] = edata[ecut][extra[j][0]]
+                ccc[:,1] = edata[ecut][extra[j][1]]
+                c.append(ccc)
+            cc.append(c)
+        pos.put( [tiles[i],images[i],psfs[i],p,cc] )
     return pos
 
 
@@ -353,8 +380,16 @@ def CatPDFs(outdir, outname, tiles):
 
 if __name__ == "__main__":
 
-    retrievefile = 'get-postage-stamp.fits'
+    #retrievefile = 'badRegionCutoutCoords-g.fits' 
+    #retrievefile = 'get-postage-stamp.fits'
+    #retrievefile = 'get-postage-stamp2.fits'
+    #extracoordsfile = 'coords2.fits'
+    retrievefile = 'badRegionCutoutCoords-g-noEli.fits'
+
     bands = ['det', 'g', 'r', 'i', 'z', 'Y']
+    #extra = [ ['x','y'] ] * len(bands)
+    extra = None
+
     layout = (2, 3)
     min = 51
 
@@ -363,14 +398,14 @@ if __name__ == "__main__":
     xmax = 'xmax_image'
     ymin = 'ymin_image'
     ymax = 'ymax_image'
-    cx = 'xwin_image'
-    cy = 'ywin_image'
-    nocentroids = True
+    ps_index = 'index'
+    extra_index = 'index'
+
 
     imgdir = '/data/esuchyta/postage-stamps'
-    outdir = 'postage-stamps'
-    outname = 'combined.pdf'
+    outdir = 'test3-postage-stamps'
     imext = 0
+    #outname = '-combined.pdf'
 
  
     desdbConfig = {
@@ -380,23 +415,28 @@ if __name__ == "__main__":
     }
 
 
-    '''
     # Call desdb to find the tiles we need to download and delete any existing DB tables which are the same as your run label.
     if MPI.COMM_WORLD.Get_rank()==0:
-        retrievedata = esutil.io.read(retrievefile)
+        retrievedata = esutil.io.read(retrievefile)[0:20]
+        if extra==None:
+            extradata = None 
+        else:
+            extradata = esutil.io.read(extracoordsfile)
         tiles = np.unique(retrievedata[tilename])
         images, psfs, tiles = GetFiles(bands, desdbConfig, tiles)
-        PostageStamps = GetCoords(retrievedata, tiles, images, psfs, bands, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, cx=cx, cy=cy, tilename=tilename, nocentroids=nocentroids)
+        PostageStamps = GetCoords(retrievedata, extradata, tiles, images, psfs, bands, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, tilename=tilename, ps_index=ps_index, extra_index=extra_index, extra=extra)
         ServeProcesses(PostageStamps)
     else:
-        DoProcesses(imgdir, layout, outdir, nocentroids, bands, imext, min) 
+        DoProcesses(imgdir, layout, outdir, bands, imext, min) 
 
+    '''
     MPI.COMM_WORLD.barrier()
     if MPI.COMM_WORLD.Get_rank()==0:
         CatPDFs(outdir, outname, tiles)
     '''
 
 
+    '''
     retrievedata = esutil.io.read(retrievefile)
     tiles = np.unique(retrievedata[tilename])
 
@@ -414,4 +454,4 @@ if __name__ == "__main__":
         Clean(images, psfs)
 
     CatPDFs(outdir, outname, tiles)
-
+    '''
